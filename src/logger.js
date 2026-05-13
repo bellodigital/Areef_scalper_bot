@@ -1,1 +1,28 @@
 
+const winston = require('winston');
+const config = require('../config');
+const fs = require('fs');
+
+if (!fs.existsSync('logs')) fs.mkdirSync('logs');
+
+const logger = winston.createLogger({
+  level: config.logLevel,
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.printf(({ timestamp, level, message }) => {
+      return `[${timestamp}] ${level.toUpperCase()}: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({
+      filename: 'logs/bot.log',
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      ),
+    }),
+  ],
+});
+
+module.exports = logger;
