@@ -2,7 +2,7 @@ const axios = require('axios');
 const config = require('../config');
 const logger = require('./logger');
 
-const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex';
+const DEXSCREENER_API = 'https://api.dexscreener.com';
 
 class MarketScanner {
   constructor() {
@@ -10,27 +10,47 @@ class MarketScanner {
     this.opportunities = [];
   }
 
-  async getTrendingTokens() {
+  async getTopSolanaPairs() {
     try {
-      const res = await axios.get(`${DEXSCREENER_API}/search?q=SOL`, {
-        timeout: 10000,
-      });
-      return (res.data?.pairs || []).filter(p => p.chainId === 'solana');
+      const res = await axios.get(
+        `${DEXSCREENER_API}/token-profiles/latest/v1`,
+        {
+          timeout: 10000,
+          headers: { 'Accept': 'application/json' },
+        }
+      );
+      const tokens = res.data || [];
+      const solTokens = tokens
+        .filter(t => t.chainId === 'solana')
+        .slice(0, 20);
+
+      const pairs = [];
+      for (const token of solTokens.slice(0, 8)) {
+        await this.sleep(500);
+        try {
+          const r = await axios.get(
+            `${DEXSCREENER_API}/latest/dex/tokens/${token.tokenAddress}`,
+            { timeout: 8000, headers: { 'Accept': 'application/json' } }
+          );
+          const p = (r.data?.pairs || [])
+            .filter(x => x.chainId === 'solana')
+            .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
+          if (p) pairs.push(p);
+        } catch (_) {}
+      }
+      return pairs;
     } catch (err) {
-      logger.warn('Trending fetch error: ' + err.message);
+      logger.warn('Token profiles error: ' + err.message);
       return [];
     }
   }
 
   async getTokenData(mintAddress) {
     try {
-      const res = await axios.get(`${DEXSCREENER_API}/search?q=SOL`, {
-  timeout: 10000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0',
-    'Accept': 'application/json',
-  },
-});
+      const res = await axios.get(
+        `${DEXSCREENER_API}/latest/dex/tokens/${mintAddress}`,
+        { timeout: 8000, headers: { 'Accept': 'application/json' } }
+      );
       return (res.data?.pairs || [])
         .filter(p => p.chainId === 'solana')
         .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0] || null;
@@ -38,6 +58,10 @@ class MarketScanner {
       logger.warn('Token fetch error: ' + err.message);
       return null;
     }
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   scoreOpportunity(pair) {
@@ -97,13 +121,14 @@ class MarketScanner {
 
     if (config.scanner.watchList.length > 0) {
       for (const mint of config.scanner.watchList) {
+        await this.sleep(300);
         const pair = await this.getTokenData(mint);
         if (pair) allPairs.push(pair);
       }
     }
 
-    const trending = await this.getTrendingTokens();
-    allPairs.push(...trending.slice(0, 50));
+    const trending = await this.getTopSolanaPairs();
+    allPairs.push(...trending);
 
     const seen = new Set();
     const unique = allPairs.filter(p => {
