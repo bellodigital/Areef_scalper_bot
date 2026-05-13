@@ -24,9 +24,13 @@ class MarketScanner {
 
   async getTokenData(mintAddress) {
     try {
-      const res = await axios.get(`${DEXSCREENER_API}/tokens/${mintAddress}`, {
-        timeout: 8000,
-      });
+      const res = await axios.get(`${DEXSCREENER_API}/search?q=SOL`, {
+  timeout: 10000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0',
+    'Accept': 'application/json',
+  },
+});
       return (res.data?.pairs || [])
         .filter(p => p.chainId === 'solana')
         .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0] || null;
