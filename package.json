@@ -1,1 +1,20 @@
-
+{
+  "name": "solana-scalper",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3",
+    "axios": "^1.7.7",
+    "express": "^4.21.0",
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3",
+    "ws": "^8.18.0",
+    "winston": "^3.15.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
