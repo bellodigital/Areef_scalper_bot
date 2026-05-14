@@ -11,6 +11,11 @@ class ScalpingBot {
     this.priceUpdateInterval = null;
     this.lastOpportunities = [];
 
+    // Candle confirmation tracker
+    // { pairAddress: { count: N, opportunity: {...} } }
+    this.watchList = new Map();
+    this.CONFIRMATIONS_REQUIRED = 3;
+
     if (config.mode === 'paper') {
       this.engine = new PaperTradingEngine();
       logger.info('Bot running in PAPER mode');
@@ -50,17 +55,71 @@ class ScalpingBot {
       const opportunities = await scanner.scan();
       this.lastOpportunities = opportunities;
 
-      for (const opp of opportunities.slice(0, 3)) {
-        if (this.engine.positions.has(opp.pairAddress)) continue;
+      // Get current opportunity addresses
+      const currentAddresses = new Set(
+        opportunities.map(o => o.pairAddress)
+      );
 
-        if (opp.score >= 65) {
-          logger.info(`Entry signal: ${opp.baseToken.symbol} (score: ${opp.score})`);
-          const position = this.engine.openPosition(opp);
-          if (position) {
-            await notifier.tradeOpened(position);
-          }
+      // Remove tokens from watchlist that no longer qualify
+      for (const [addr] of this.watchList) {
+        if (!currentAddresses.has(addr)) {
+          const w = this.watchList.get(addr);
+          logger.info(
+            `WATCH REMOVED: ${w.opportunity.baseToken.symbol} — lost signal`
+          );
+          this.watchList.delete(addr);
         }
       }
+
+      // Process top opportunities
+      for (const opp of opportunities.slice(0, 5)) {
+
+        // Skip if already in an open position
+        if (this.engine.positions.has(opp.pairAddress)) continue;
+
+        // Only watch strong signals
+        if (opp.score < 65) continue;
+
+        if (this.watchList.has(opp.pairAddress)) {
+          // Token already being watched — increment confirmation count
+          const watch = this.watchList.get(opp.pairAddress);
+          watch.count += 1;
+          watch.opportunity = opp; // Update with latest data
+
+          logger.info(
+            `WATCHING: ${opp.baseToken.symbol} — ` +
+            `confirmation ${watch.count}/${this.CONFIRMATIONS_REQUIRED} ` +
+            `(score: ${opp.score})`
+          );
+
+          // Enter on 3rd confirmation
+          if (watch.count >= this.CONFIRMATIONS_REQUIRED) {
+            logger.info(
+              `✅ 3 CANDLES CONFIRMED: ${opp.baseToken.symbol} — ENTERING`
+            );
+            const position = this.engine.openPosition(opp);
+            if (position) {
+              await notifier.tradeOpened(position);
+            }
+            // Remove from watchlist after entry
+            this.watchList.delete(opp.pairAddress);
+          }
+
+        } else {
+          // First time seeing this token qualify — start watching
+          this.watchList.set(opp.pairAddress, {
+            count: 1,
+            opportunity: opp,
+            firstSeen: new Date().toISOString(),
+          });
+          logger.info(
+            `👀 WATCHING NEW: ${opp.baseToken.symbol} — ` +
+            `confirmation 1/${this.CONFIRMATIONS_REQUIRED} ` +
+            `(score: ${opp.score})`
+          );
+        }
+      }
+
     } catch (err) {
       logger.error('Scan cycle error: ' + err.message);
     }
@@ -77,7 +136,10 @@ class ScalpingBot {
         );
         if (!latest) continue;
 
-        const result = this.engine.updatePosition(pos.pairAddress, latest.priceUsd);
+        const result = this.engine.updatePosition(
+          pos.pairAddress,
+          latest.priceUsd
+        );
 
         if (!result && this.engine.closedTrades[0]) {
           await notifier.tradeClosed(this.engine.closedTrades[0]);
@@ -95,6 +157,13 @@ class ScalpingBot {
       mode: config.mode,
       lastScanAt: scanner.lastScan,
       opportunities: this.lastOpportunities.slice(0, 5),
+      watching: Array.from(this.watchList.values()).map(w => ({
+        symbol: w.opportunity.baseToken.symbol,
+        score: w.opportunity.score,
+        confirmations: w.count,
+        required: this.CONFIRMATIONS_REQUIRED,
+        firstSeen: w.firstSeen,
+      })),
       ...engineState,
       config: {
         scanIntervalSeconds: config.scanner.intervalSeconds,
@@ -102,6 +171,7 @@ class ScalpingBot {
         stopLoss: config.risk.stopLossPercent,
         takeProfit: config.risk.takeProfitPercent,
         maxPositions: config.risk.maxConcurrentPositions,
+        confirmationsRequired: this.CONFIRMATIONS_REQUIRED,
       },
     };
   }
