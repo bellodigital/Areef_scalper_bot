@@ -53,7 +53,7 @@ class ScalpingBot {
       for (const opp of opportunities.slice(0, 3)) {
         if (this.engine.positions.has(opp.pairAddress)) continue;
 
-        if (opp.score >= 55) {
+        if (opp.score >= 65) {
           logger.info(`Entry signal: ${opp.baseToken.symbol} (score: ${opp.score})`);
           const position = this.engine.openPosition(opp);
           if (position) {
