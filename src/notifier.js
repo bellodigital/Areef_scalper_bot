@@ -13,6 +13,7 @@ class Notifier {
 
   async send(content, embeds = []) {
     if (!this.enabled) return;
+    await new Promise(r => setTimeout(r, 1000));
     try {
       await axios.post(this.webhookUrl, {
         username: 'SOL Scalper Bot',
